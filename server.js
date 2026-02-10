@@ -413,5 +413,14 @@ app.use((req, res) => {
   });
 });
 
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'alive',
+    message: 'Nommia backend running on Vercel',
+    time: new Date().toISOString(),
+    env: process.env.NODE_ENV || 'unknown'
+  });
+});
 
-export default app;
+
+module.exports = app;
