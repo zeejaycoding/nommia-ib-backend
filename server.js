@@ -413,14 +413,8 @@ app.use((req, res) => {
   });
 });
 
-app.get('/', (req, res) => {
-  res.status(200).json({
-    status: 'alive',
-    message: 'Nommia backend running on Vercel',
-    time: new Date().toISOString(),
-    env: process.env.NODE_ENV || 'unknown'
-  });
+const port = process.env.PORT || 5000; 
+
+app.listen(port, '0.0.0.0', () => {
+  console.log(`[Server] Running on http://0.0.0.0:${port} (env: ${process.env.NODE_ENV || 'development'})`);
 });
-
-
-module.exports = app;
