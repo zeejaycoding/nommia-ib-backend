@@ -414,7 +414,4 @@ app.use((req, res) => {
 });
 
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Server] Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+export default app;
