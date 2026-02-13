@@ -91,15 +91,18 @@ const initializeEmail = () => {
     console.log('[Email] Initializing Brevo SMTP transporter...');
     emailTransporter = nodemailer.createTransport({
       host: SMTP_CONFIG.host,
-      port: SMTP_CONFIG.port,
-      secure: true,
+      port: SMTP_CONFIG.port || 587,
+      secure: false, // Must be false for port 587 (TLS)
       auth: {
         user: SMTP_CONFIG.user,
         pass: SMTP_CONFIG.password
+      },
+      tls: {
+        rejectUnauthorized: false
       }
     });
     
-    console.log(`[Email] ✅ Nodemailer configured with Brevo SMTP (${SMTP_CONFIG.host}:${SMTP_CONFIG.port})`);
+    console.log(`[Email] ✅ Nodemailer configured with Brevo SMTP (${SMTP_CONFIG.host}:${SMTP_CONFIG.port || 587} - TLS)`);
     return emailTransporter;
   } catch (err) {
     console.error('[Email] ❌ Failed to create transporter:', err.message);
