@@ -706,11 +706,14 @@ app.post('/api/2fa/setup', async (req, res) => {
       length: 32
     });
     
-    // Generate QR code URL
-    const qrCodeUrl = secret.qr_code_url;
+    // Generate QR code URL - encode the secret properly
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(
+      `otpauth://totp/Nommia:${username}?secret=${secret.base32}&issuer=Nommia`
+    )}`;
     
     console.log(`[2FA] Setup initiated for user: ${username}`);
     console.log(`[2FA] Secret: ${secret.base32}`);
+    console.log(`[2FA] QR URL generated: ${qrCodeUrl.substring(0, 80)}...`);
     
     // Save to database (not enabled yet - will be enabled after verification)
     if (supabase) {
