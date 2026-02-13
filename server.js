@@ -7,10 +7,44 @@ require('dotenv').config();
 const app = express();
 
 app.use(express.json({ limit: '50mb' }));
+
+// ============= CORS CONFIGURATION =============
+const allowedOrigins = [
+  'https://nommia-ib-dashboard.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:5000',
+  process.env.CLIENT_URL || 'https://nommia-ib-dashboard.onrender.com'
+];
+
 app.use(cors({
-  origin: [
-    process.env.CLIENT_URL || 'https://nommia-ib-dashboard.onrender.com'],
-  credentials: true
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] Blocked request from origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  maxAge: 86400
+}));
+
+// Handle OPTIONS requests explicitly
+app.options('*', cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 // ============= SUPABASE CLIENT =============
