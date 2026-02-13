@@ -111,20 +111,65 @@ const initializeEmail = () => {
 console.log('[Init] Starting email transporter initialization...');
 const transporter = initializeEmail();
 
-// Test email connection
+// Test email connection (non-blocking with timeout)
+let emailVerified = false;
 if (transporter) {
-  console.log('[Email] Testing Brevo SMTP connection...');
+  console.log('[Email] Testing Brevo SMTP connection (with 10s timeout)...');
+  
+  // Set a timeout for verification - don't block server startup
+  const verifyTimeout = setTimeout(() => {
+    if (!emailVerified) {
+      console.warn('[Email] ⚠️ SMTP verification timeout (>10s) - will retry on first email send');
+    }
+  }, 10000);
+  
   transporter.verify((error, success) => {
+    clearTimeout(verifyTimeout);
+    emailVerified = true;
+    
     if (error) {
       console.error('[Email] ❌ Brevo SMTP connection failed:', error.message);
-      console.error('[Email] ⚠️ Check SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD in .env');
+      console.warn('[Email] ⚠️ Email sending may fail - will attempt on first request');
+      console.warn('[Email] Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD in .env');
+      console.warn('[Email] Or check if Render has firewall restrictions on port 465');
     } else {
-      console.log('[Email] ✅ Brevo SMTP connection verified!');
+      console.log('[Email] ✅ Brevo SMTP connection verified! Ready to send emails.');
     }
   });
 } else {
   console.error('[Email] ❌ Transporter initialization failed - email features will not work');
 }
+
+// ============= EMAIL HELPER FUNCTIONS =============
+
+/**
+ * Send email with automatic retry logic
+ * Retries up to 3 times with exponential backoff
+ */
+const sendEmailWithRetry = async (mailOptions, maxRetries = 3) => {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`[Email] Sending (attempt ${attempt}/${maxRetries})...`);
+      const info = await transporter.sendMail(mailOptions);
+      console.log(`[Email] ✅ Sent successfully (Message ID: ${info.messageId})`);
+      return info;
+    } catch (error) {
+      lastError = error;
+      console.warn(`[Email] ⚠️ Attempt ${attempt} failed: ${error.message}`);
+      
+      if (attempt < maxRetries) {
+        // Exponential backoff: 1s, 2s, 4s
+        const delayMs = Math.pow(2, attempt - 1) * 1000;
+        console.log(`[Email] Retrying in ${delayMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  
+  throw lastError;
+};
 
 // ============= EMAIL TEMPLATES =============
 
@@ -434,10 +479,10 @@ app.post('/api/nudges/send', async (req, res) => {
     const template = emailTemplates[nudgeType];
     const emailBody = template.getBody(recipientName, referrerName);
 
-    console.log(`[Email] Sending ${nudgeType} to ${recipientEmail}...`);
+    console.log(`[Nudge] Sending ${nudgeType} to ${recipientEmail}...`);
 
-    // Send email via Brevo SMTP
-    const info = await transporter.sendMail({
+    // Send email via Brevo SMTP with retry logic
+    const info = await sendEmailWithRetry({
       from: `"${SMTP_CONFIG.fromName}" <${SMTP_CONFIG.from}>`,
       to: recipientEmail,
       subject: template.subject,
@@ -445,7 +490,7 @@ app.post('/api/nudges/send', async (req, res) => {
       text: emailBody
     });
 
-    console.log(`[Email] ✅ Nudge sent to ${recipientEmail} via Brevo SMTP (Message ID: ${info.messageId})`);
+    console.log(`[Nudge] ✅ Nudge sent to ${recipientEmail} via Brevo SMTP`);
 
     res.status(200).json({
       success: true,
@@ -458,7 +503,7 @@ app.post('/api/nudges/send', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[Email] ❌ Error:', error.message);
+    console.error('[Nudge] ❌ Error:', error.message);
     res.status(500).json({
       error: 'Failed to send email',
       details: error.message
@@ -838,16 +883,21 @@ app.post('/api/otp/send', async (req, res) => {
         `
       };
 
-      // Send email via Brevo
+      // Send email via Brevo with retry logic
       if (transporter) {
-        await transporter.sendMail(mailOptions);
-        console.log(`[Email] ✅ OTP sent successfully to ${email} via Brevo SMTP`);
+        try {
+          await sendEmailWithRetry(mailOptions);
+          console.log(`[OTP] ✅ OTP sent successfully to ${email} via Brevo SMTP`);
+        } catch (sendErr) {
+          console.warn(`[OTP] ⚠️ Failed to send OTP email after 3 retries: ${sendErr.message}`);
+          // Don't fail the request if email fails - OTP was generated and stored
+        }
       } else {
-        console.warn(`[Email] ⚠️ Transporter not configured. OTP for ${email}: ${otp} (would be sent via Brevo)`);
+        console.warn(`[OTP] ⚠️ Transporter not configured. OTP for ${email}: ${otp} (would be sent via Brevo)`);
       }
     } catch (emailErr) {
-      console.error('[Email] ❌ Failed to send OTP email via Brevo:', emailErr.message);
-      // Don't fail the request if email fails - OTP was generated and stored
+      console.error('[OTP] ⚠️ Error preparing email:', emailErr.message);
+      // Don't fail the request if email preparation fails
     }
 
     res.status(200).json({
