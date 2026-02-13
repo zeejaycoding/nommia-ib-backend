@@ -4,11 +4,21 @@ const nodemailer = require('nodemailer');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
+// ============= EARLY STARTUP LOGGING =============
+console.log('\n========================================');
+console.log('[STARTUP] Backend initializing...');
+console.log(`[STARTUP] Port: ${process.env.PORT || 5000}`);
+console.log(`[STARTUP] Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log('[STARTUP] Loading modules...');
+console.log('========================================\n');
+
 const app = express();
 
+console.log('[Init] Setting up Express middleware...');
 app.use(express.json({ limit: '50mb' }));
 
 // ============= CORS CONFIGURATION =============
+console.log('[Init] Configuring CORS...');
 const allowedOrigins = [
   'https://nommia-ib-dashboard.onrender.com',
   'http://localhost:5173',
@@ -16,6 +26,7 @@ const allowedOrigins = [
   'http://localhost:5000',
   process.env.CLIENT_URL || 'https://nommia-ib-dashboard.onrender.com'
 ];
+console.log(`[CORS] Allowed origins: ${allowedOrigins.join(', ')}`);
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -48,6 +59,7 @@ app.options('*', cors({
 }));
 
 // ============= SUPABASE CLIENT =============
+console.log('[Init] Initializing Supabase client...');
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 
@@ -62,6 +74,7 @@ if (supabaseUrl && supabaseKey) {
 let emailTransporter = null;
 
 // Brevo SMTP Configuration (from .env)
+console.log('[Init] Loading Brevo SMTP configuration...');
 const SMTP_CONFIG = {
   host: process.env.SMTP_HOST ,
   port: process.env.SMTP_PORT,
@@ -75,6 +88,7 @@ const initializeEmail = () => {
   if (emailTransporter) return emailTransporter;
     
   try {
+    console.log('[Email] Initializing Brevo SMTP transporter...');
     emailTransporter = nodemailer.createTransport({
       host: SMTP_CONFIG.host,
       port: SMTP_CONFIG.port,
@@ -94,18 +108,22 @@ const initializeEmail = () => {
 };
 
 // Initialize on startup
+console.log('[Init] Starting email transporter initialization...');
 const transporter = initializeEmail();
 
 // Test email connection
 if (transporter) {
+  console.log('[Email] Testing Brevo SMTP connection...');
   transporter.verify((error, success) => {
     if (error) {
       console.error('[Email] ❌ Brevo SMTP connection failed:', error.message);
-     // console.error('[Email] Check SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD in .env');
+      console.error('[Email] ⚠️ Check SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD in .env');
     } else {
       console.log('[Email] ✅ Brevo SMTP connection verified!');
     }
   });
+} else {
+  console.error('[Email] ❌ Transporter initialization failed - email features will not work');
 }
 
 // ============= EMAIL TEMPLATES =============
@@ -992,8 +1010,35 @@ app.use((req, res) => {
   });
 });
 
-const port = process.env.PORT || 5000; 
+const port = process.env.PORT || 5000;
+const host = '0.0.0.0';
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`[Server] Running on http://0.0.0.0:${port} (env: ${process.env.NODE_ENV || 'development'})`);
+// Start server with detailed logging
+const server = app.listen(port, host, () => {
+  console.log('\n========================================');
+  console.log(`[Server] ✅ RUNNING on http://${host}:${port}`);
+  console.log(`[Server] Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log('[Server] Ready to accept requests');
+  console.log('========================================\n');
+});
+
+// Handle server errors
+server.on('error', (err) => {
+  console.error('[Server] ❌ Error:', err.message);
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[Server] Port ${port} already in use`);
+  }
+  process.exit(1);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('[Process] ❌ Uncaught exception:', err);
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Process] ❌ Unhandled rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });
