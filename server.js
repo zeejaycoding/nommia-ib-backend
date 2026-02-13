@@ -134,7 +134,6 @@ if (transporter) {
       console.error('[Email] ❌ Brevo SMTP connection failed:', error.message);
       console.warn('[Email] ⚠️ Email sending may fail - will attempt on first request');
       console.warn('[Email] Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD in .env');
-      console.warn('[Email] Or check if Render has firewall restrictions on port 465');
     } else {
       console.log('[Email] ✅ Brevo SMTP connection verified! Ready to send emails.');
     }
@@ -824,11 +823,28 @@ const otpStore = new Map();
  */
 app.post('/api/otp/send', async (req, res) => {
   try {
+    console.log('[OTP Send] Request received. Body:', JSON.stringify(req.body));
+    
     const { email, type } = req.body;
 
-    if (!email) {
+    console.log(`[OTP Send] Extracted email: "${email}", type: "${type}"`);
+
+    // Validate email
+    if (!email || email.trim() === '') {
+      console.warn('[OTP Send] ❌ Email is missing or empty');
       return res.status(400).json({ 
-        error: 'Missing required field: email'
+        error: 'Missing required field: email',
+        received: { email: email || 'undefined', type }
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      console.warn(`[OTP Send] ❌ Invalid email format: "${email}"`);
+      return res.status(400).json({ 
+        error: 'Invalid email format',
+        received: email
       });
     }
 
@@ -845,7 +861,7 @@ app.post('/api/otp/send', async (req, res) => {
       type: type || 'verification'
     });
 
-    console.log(`[OTP] Generated OTP for ${email}: ${otp} (expires in 10 min)`);
+    console.log(`[OTP] ✅ Generated OTP for ${email}: ${otp} (expires in 10 min)`);
 
     // Send OTP via email using nodemailer + Brevo SMTP
     try {
