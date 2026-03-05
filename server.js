@@ -3,35 +3,8 @@ const cors = require('cors');
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 const speakeasy = require('speakeasy');
-const httpProxy = require('http-proxy');
+const WebSocket = require('ws');
 require('dotenv').config();
-
-// ============= WEBSOCKET PROXY SETUP =============
-// Proxies deployed frontend WebSocket connections to vanex.site servers
-// (mirrors Vite dev-server proxy behaviour for production)
-const wsAdminProxy = httpProxy.createProxyServer({
-  target: 'wss://platform-admin.vanex.site',
-  ws: true,
-  secure: true,
-  changeOrigin: true
-});
-
-const wsTradeProxy = httpProxy.createProxyServer({
-  target: 'wss://platform-trade.vanex.site',
-  ws: true,
-  secure: true,
-  changeOrigin: true
-});
-
-wsAdminProxy.on('error', (err, req, socket) => {
-  console.error('[WS-Proxy-Admin] ❌ Error:', err.message);
-  if (socket && socket.writable) socket.end();
-});
-
-wsTradeProxy.on('error', (err, req, socket) => {
-  console.error('[WS-Proxy-Trade] ❌ Error:', err.message);
-  if (socket && socket.writable) socket.end();
-});
 
 // ============= EARLY STARTUP LOGGING =============
 console.log('\n========================================');
@@ -1420,22 +1393,66 @@ const server = app.listen(port, host, () => {
   console.log('========================================\n');
 });
 
-// ============= WEBSOCKET UPGRADE HANDLER =============
-// Intercepts WebSocket upgrade requests and proxies them to the correct vanex.site server.
-// This mirrors the Vite dev-proxy so production deployments work the same as localhost.
-server.on('upgrade', (req, socket, head) => {
-  if (req.url.startsWith('/ws-admin')) {
-    req.url = '/ws';
-    console.log('[WS-Proxy-Admin] ⬆ Upgrading to WebSocket → platform-admin.vanex.site');
-    wsAdminProxy.ws(req, socket, head);
-  } else if (req.url.startsWith('/ws-trade')) {
-    req.url = '/ws';
-    console.log('[WS-Proxy-Trade] ⬆ Upgrading to WebSocket → platform-trade.vanex.site');
-    wsTradeProxy.ws(req, socket, head);
-  } else {
-    socket.destroy();
-  }
-});
+// ============= WEBSOCKET RELAY BRIDGE =============
+// Creates proper WebSocket server endpoints that relay connections to vanex.site.
+// This works on Render in production just like Vite's dev-proxy does locally.
+
+function createWsRelay(httpServer, path, targetUrl) {
+  const wss = new WebSocket.Server({ noServer: true });
+
+  wss.on('connection', (clientWs) => {
+    console.log(`[WS-Relay] Client connected via ${path} → ${targetUrl}`);
+    const targetWs = new WebSocket(targetUrl);
+
+    targetWs.on('open', () => {
+      // Relay client → target
+      clientWs.on('message', (msg, isBinary) => {
+        if (targetWs.readyState === WebSocket.OPEN) {
+          targetWs.send(msg, { binary: isBinary });
+        }
+      });
+
+      // Relay target → client
+      targetWs.on('message', (msg, isBinary) => {
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(msg, { binary: isBinary });
+        }
+      });
+    });
+
+    targetWs.on('close', (code, reason) => {
+      if (clientWs.readyState === WebSocket.OPEN) clientWs.close(code, reason);
+    });
+
+    clientWs.on('close', (code, reason) => {
+      if (targetWs.readyState !== WebSocket.CLOSED) targetWs.close(code, reason);
+    });
+
+    targetWs.on('error', (err) => {
+      console.error(`[WS-Relay] Target error (${path}):`, err.message);
+      if (clientWs.readyState === WebSocket.OPEN) clientWs.close(1014, 'Target unavailable');
+    });
+
+    clientWs.on('error', (err) => {
+      console.error(`[WS-Relay] Client error (${path}):`, err.message);
+      if (targetWs.readyState !== WebSocket.CLOSED) targetWs.close();
+    });
+  });
+
+  httpServer.on('upgrade', (req, socket, head) => {
+    if (req.url.startsWith(path)) {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit('connection', ws, req);
+      });
+    }
+  });
+
+  return wss;
+}
+
+createWsRelay(server, '/ws-admin', 'wss://platform-admin.vanex.site/ws');
+createWsRelay(server, '/ws-trade', 'wss://platform-trade.vanex.site/ws');
+console.log('[WS-Relay] ✅ WebSocket relay bridges registered: /ws-admin, /ws-trade');
 
 // Handle server errors
 server.on('error', (err) => {
