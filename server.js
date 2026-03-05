@@ -3,7 +3,6 @@ const cors = require('cors');
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 const speakeasy = require('speakeasy');
-const WebSocket = require('ws');
 require('dotenv').config();
 
 // ============= EARLY STARTUP LOGGING =============
@@ -1392,67 +1391,6 @@ const server = app.listen(port, host, () => {
   //console.log('[Server] Ready to accept requests');
   console.log('========================================\n');
 });
-
-// ============= WEBSOCKET RELAY BRIDGE =============
-// Creates proper WebSocket server endpoints that relay connections to vanex.site.
-// This works on Render in production just like Vite's dev-proxy does locally.
-
-function createWsRelay(httpServer, path, targetUrl) {
-  const wss = new WebSocket.Server({ noServer: true });
-
-  wss.on('connection', (clientWs) => {
-    console.log(`[WS-Relay] Client connected via ${path} → ${targetUrl}`);
-    const targetWs = new WebSocket(targetUrl);
-
-    targetWs.on('open', () => {
-      // Relay client → target
-      clientWs.on('message', (msg, isBinary) => {
-        if (targetWs.readyState === WebSocket.OPEN) {
-          targetWs.send(msg, { binary: isBinary });
-        }
-      });
-
-      // Relay target → client
-      targetWs.on('message', (msg, isBinary) => {
-        if (clientWs.readyState === WebSocket.OPEN) {
-          clientWs.send(msg, { binary: isBinary });
-        }
-      });
-    });
-
-    targetWs.on('close', (code, reason) => {
-      if (clientWs.readyState === WebSocket.OPEN) clientWs.close(code, reason);
-    });
-
-    clientWs.on('close', (code, reason) => {
-      if (targetWs.readyState !== WebSocket.CLOSED) targetWs.close(code, reason);
-    });
-
-    targetWs.on('error', (err) => {
-      console.error(`[WS-Relay] Target error (${path}):`, err.message);
-      if (clientWs.readyState === WebSocket.OPEN) clientWs.close(1014, 'Target unavailable');
-    });
-
-    clientWs.on('error', (err) => {
-      console.error(`[WS-Relay] Client error (${path}):`, err.message);
-      if (targetWs.readyState !== WebSocket.CLOSED) targetWs.close();
-    });
-  });
-
-  httpServer.on('upgrade', (req, socket, head) => {
-    if (req.url.startsWith(path)) {
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        wss.emit('connection', ws, req);
-      });
-    }
-  });
-
-  return wss;
-}
-
-createWsRelay(server, '/ws-admin', 'wss://platform-admin.vanex.site/ws');
-createWsRelay(server, '/ws-trade', 'wss://platform-trade.vanex.site/ws');
-console.log('[WS-Relay] ✅ WebSocket relay bridges registered: /ws-admin, /ws-trade');
 
 // Handle server errors
 server.on('error', (err) => {
