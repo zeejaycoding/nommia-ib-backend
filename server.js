@@ -5,9 +5,6 @@ const { createClient } = require('@supabase/supabase-js');
 const speakeasy = require('speakeasy');
 require('dotenv').config();
 
-// ============= EARLY STARTUP LOGGING =============
-console.log('\n========================================');
-console.log('[STARTUP] Backend initializing...');
 console.log(`[STARTUP] Port: ${process.env.PORT || 5000}`);
 console.log(`[STARTUP] Environment: ${process.env.NODE_ENV || 'development'}`);
 console.log('[STARTUP] Loading modules...');
@@ -15,11 +12,9 @@ console.log('========================================\n');
 
 const app = express();
 
-console.log('[Init] Setting up Express middleware...');
 app.use(express.json({ limit: '50mb' }));
 
 // ============= CORS CONFIGURATION =============
-console.log('[Init] Configuring CORS...');
 const allowedOrigins = [
   'https://nommia-ib-dashboard.onrender.com',
   'http://localhost:5173',
@@ -27,7 +22,6 @@ const allowedOrigins = [
   'http://localhost:5000',
   process.env.CLIENT_URL || 'https://nommia-ib-dashboard.onrender.com'
 ];
-console.log(`[CORS] Allowed origins: ${allowedOrigins.join(', ')}`);
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -59,8 +53,6 @@ app.options('*', cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// ============= SUPABASE CLIENT =============
-console.log('[Init] Initializing Supabase client...');
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 
@@ -72,8 +64,6 @@ if (supabaseUrl && supabaseKey) {
   console.warn('[Supabase] ⚠️ SUPABASE_URL or SUPABASE_KEY not set - payout storage disabled');
 }
 
-// ============= BREVO EMAIL API CONFIGURATION =============
-console.log('[Init] Loading Brevo API configuration...');
 const BREVO_API_KEY = process.env.BREVO_API_KEY;
 const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
@@ -84,22 +74,14 @@ const EMAIL_CONFIG = {
 
 // Test Brevo API connection
 if (BREVO_API_KEY) {
-  console.log('[Email] ✅ Brevo API key loaded');
   console.log('[Email] ✅ Using Brevo REST API for email sending (suitable for Render deployment)');
 } else {
   console.error('[Email] ❌ BREVO_API_KEY not set in .env');
 }
 
-// ============= EMAIL HELPER FUNCTIONS =============
-
-/**
- * Send email via Brevo REST API with automatic retry logic
- * Retries up to 3 times with exponential backoff
- */
 const sendEmailWithRetry = async (mailOptions, maxRetries = 3) => {
   let lastError;
   
-  // Convert nodemailer format to Brevo API format
   const recipientEmails = Array.isArray(mailOptions.to) ? mailOptions.to : [mailOptions.to];
   
   const brevoPayload = {
@@ -134,7 +116,6 @@ const sendEmailWithRetry = async (mailOptions, maxRetries = 3) => {
       console.warn(`[Email] ⚠️ Attempt ${attempt} failed: ${errorMsg}`);
       
       if (attempt < maxRetries) {
-        // Exponential backoff: 1s, 2s, 4s
         const delayMs = Math.pow(2, attempt - 1) * 1000;
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
@@ -144,7 +125,6 @@ const sendEmailWithRetry = async (mailOptions, maxRetries = 3) => {
   throw lastError;
 };
 
-// ============= EMAIL TEMPLATES =============
 
 const emailTemplates = {
   'Complete KYC': {
@@ -417,7 +397,6 @@ app.post('/api/nudges/send', async (req, res) => {
       partnerId 
     } = req.body;
 
-    // Validate required fields
     const missing = [];
     if (!recipientEmail) missing.push('recipientEmail');
     if (!recipientName) missing.push('recipientName');
@@ -432,7 +411,6 @@ app.post('/api/nudges/send', async (req, res) => {
       });
     }
 
-    // Validate nudge type
     if (!emailTemplates[nudgeType]) {
       const validTypes = Object.keys(emailTemplates).join(', ');
       return res.status(400).json({ 
@@ -440,7 +418,6 @@ app.post('/api/nudges/send', async (req, res) => {
       });
     }
 
-    // Validate email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(recipientEmail)) {
       return res.status(400).json({ 
@@ -448,13 +425,9 @@ app.post('/api/nudges/send', async (req, res) => {
       });
     }
 
-    // Get template and build email
     const template = emailTemplates[nudgeType];
     const emailBody = template.getBody(recipientName, referrerName);
 
-    // console.log(`[Nudge] Sending ${nudgeType} to ${recipientEmail}...`);
-
-    // Send email via Brevo API with retry logic
     const info = await sendEmailWithRetry({
       from: `"${EMAIL_CONFIG.fromName}" <${EMAIL_CONFIG.from}>`,
       to: recipientEmail,
@@ -463,7 +436,7 @@ app.post('/api/nudges/send', async (req, res) => {
       text: emailBody
     });
 
-    // console.log(`[Nudge] ✅ Nudge sent to ${recipientEmail} via Brevo SMTP`);
+     console.log(`[Nudge] ✅ Nudge sent to ${recipientEmail} via Brevo SMTP`);
 
     res.status(200).json({
       success: true,
@@ -484,9 +457,6 @@ app.post('/api/nudges/send', async (req, res) => {
   }
 });
 
-/**
- * GET /api/nudges/health
- */
 app.get('/api/nudges/health', (req, res) => {
   const isHealthy = BREVO_API_KEY !== undefined && BREVO_API_KEY !== '';
   res.status(isHealthy ? 200 : 503).json({
@@ -496,8 +466,6 @@ app.get('/api/nudges/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-
-// ============= HEALTH CHECK =============
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({
@@ -518,16 +486,12 @@ app.post('/api/payouts/save', async (req, res) => {
 
     const { partnerId, bankName, accountNumber, iban, swiftCode, usdtTrc20, usdtErc20, usdcPolygon, usdcErc20, preferredMethod } = req.body;
 
-    // Validate required fields
     if (!partnerId) {
       return res.status(400).json({ 
         error: 'Missing required field: partnerId'
       });
     }
 
-    // console.log(`[Payouts] Saving payout details for partner: ${partnerId}`);
-
-    // Upsert (insert or update)
     const { data, error } = await supabase
       .from('payout_details')
       .upsert({
@@ -593,7 +557,6 @@ app.get('/api/payouts/:partnerId', async (req, res) => {
       .single();
 
     if (error && error.code !== 'PGRST116') {
-      // PGRST116 = no rows found (it's okay)
       console.error('[Payouts] ❌ Fetch failed:', error.message);
       return res.status(400).json({ 
         error: 'Failed to fetch payout details',
@@ -661,8 +624,6 @@ app.delete('/api/payouts/:partnerId', async (req, res) => {
   }
 });
 
-// ============= ALIAS ENDPOINTS FOR PAYOUT (without 's') =============
-// These endpoints allow API calls to /api/payout/* (used by frontend api_integration_v2.js)
 app.post('/api/payout/save', async (req, res) => {
   try {
     if (!supabase) {
@@ -673,16 +634,12 @@ app.post('/api/payout/save', async (req, res) => {
 
     const { partnerId, email, bankName, accountNum, bic, usdtTrc, usdtErc, usdcPol, usdcErc, preferredMethod } = req.body;
 
-    // Validate required fields
     if (!partnerId) {
       return res.status(400).json({ 
         error: 'Missing required field: partnerId'
       });
     }
 
-    // console.log(`[Payout] Saving payout details for partner: ${partnerId}`);
-
-    // Upsert (insert or update) - map field names from frontend
     const { data, error } = await supabase
       .from('payout_details')
       .upsert({
@@ -748,7 +705,6 @@ app.get('/api/payout/:partnerId', async (req, res) => {
       .single();
 
     if (error && error.code !== 'PGRST116') {
-      // PGRST116 = no rows found (it's okay)
       console.error('[Payout] ❌ Fetch failed:', error.message);
       return res.status(400).json({ 
         error: 'Failed to fetch payout details',
@@ -823,7 +779,6 @@ app.post('/api/2fa/setup', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Username required' });
     }
     
-    // Generate a real TOTP secret using speakeasy
     const secret = speakeasy.generateSecret({
       name: `Nommia (${username})`,
       issuer: 'Nommia',
@@ -839,7 +794,6 @@ app.post('/api/2fa/setup', async (req, res) => {
     // console.log(`[2FA] Secret: ${secret.base32}`);
     // console.log(`[2FA] QR URL generated: ${qrCodeUrl.substring(0, 80)}...`);
     
-    // Save to database (not enabled yet - will be enabled after verification)
     if (supabase) {
       try {
         const { error } = await supabase
@@ -853,13 +807,10 @@ app.post('/api/2fa/setup', async (req, res) => {
         
         if (error) {
           console.warn(`[2FA] Warning saving to DB: ${error.message}`);
-          // Don't fail - still return the secret to user
         } else {
-      // console.log(`[2FA] Secret saved to database for ${username}`);
         }
       } catch (dbErr) {
         console.warn(`[2FA] Database error: ${dbErr.message}`);
-        // Continue anyway
       }
     }
     
@@ -878,11 +829,6 @@ app.post('/api/2fa/setup', async (req, res) => {
   }
 });
 
-/**
- * POST /api/2fa/verify
- * Verify 6-digit TOTP code and enable 2FA
- * Returns: { success, message }
- */
 app.post('/api/2fa/verify', async (req, res) => {
   try {
     const { username, secret, token } = req.body;
@@ -894,7 +840,6 @@ app.post('/api/2fa/verify', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid token format' });
     }
     
-    // Verify the TOTP code
     const verified = speakeasy.totp.verify({
       secret: secret,
       encoding: 'base32',
@@ -910,13 +855,12 @@ app.post('/api/2fa/verify', async (req, res) => {
       });
     }
     
-    // Code is valid - enable 2FA in database
     if (supabase) {
       try {
         const { error } = await supabase
           .from('user_2fa')
           .update({
-            enabled: true,  // Enable 2FA now that code is verified
+            enabled: true,  
             updated_at: new Date().toISOString()
           })
           .eq('username', username);
@@ -959,7 +903,6 @@ app.post('/api/2fa/verify-login', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid token' });
     }
     
-    // Fetch the secret from database
     if (!supabase) {
       return res.status(500).json({ success: false, message: '2FA service unavailable' });
     }
@@ -986,7 +929,6 @@ app.post('/api/2fa/verify-login', async (req, res) => {
       });
     }
     
-    // Verify the token against the stored secret
     const verified = speakeasy.totp.verify({
       secret: data.secret,
       encoding: 'base32',
@@ -1017,11 +959,6 @@ app.post('/api/2fa/verify-login', async (req, res) => {
   }
 });
 
-/**
- * POST /api/2fa/disable
- * Disable 2FA for user
- * Returns: { success, message }
- */
 app.post('/api/2fa/disable', async (req, res) => {
   try {
     const { username } = req.body;
@@ -1030,7 +967,6 @@ app.post('/api/2fa/disable', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Username required' });
     }
 
-    // Delete from database
     if (supabase) {
       try {
         const { error } = await supabase
@@ -1040,7 +976,6 @@ app.post('/api/2fa/disable', async (req, res) => {
         
         if (error) {
           console.warn(`[2FA] Warning disabling: ${error.message}`);
-          // Still return success
         } else {
           // console.log(`[2FA] Disabled for user: ${username}`);
         }
@@ -1062,11 +997,6 @@ app.post('/api/2fa/disable', async (req, res) => {
   }
 });
 
-/**
- * GET /api/2fa/check
- * Check if 2FA is enabled for a user
- * Returns: { success, enabled }
- */
 app.post('/api/2fa/check', async (req, res) => {
   try {
     const { username } = req.body;
@@ -1101,27 +1031,18 @@ app.post('/api/2fa/check', async (req, res) => {
   }
 });
 
-// ============= OTP VERIFICATION SYSTEM =============
-
-// In-memory OTP store (email -> { code, timestamp })
 const otpStore = new Map();
 
-/**
- * POST /api/otp/send
- * Generate and send OTP code to email
- */
 app.post('/api/otp/send', async (req, res) => {
   try {
     // console.log('[OTP Send] Request received. Body:', JSON.stringify(req.body));
     
     let { email, type } = req.body;
 
-    // Trim email before processing
     email = email ? email.trim() : '';
 
     // console.log(`[OTP Send] Extracted email: "${email}", type: "${type}"`);
 
-    // Validate email
     if (!email || email === '') {
       console.warn('[OTP Send] ❌ Email is missing or empty');
       return res.status(400).json({ 
@@ -1130,8 +1051,6 @@ app.post('/api/otp/send', async (req, res) => {
       });
     }
 
-    // Validate email format - use standard email validation
-    // More permissive regex that handles most valid email addresses
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email.toLowerCase())) {
       console.warn(`[OTP Send] ❌ Invalid email format: "${email}"`);
@@ -1148,7 +1067,6 @@ app.post('/api/otp/send', async (req, res) => {
     const timestamp = Date.now();
     const expiryTime = 10 * 60 * 1000; // 10 minutes
 
-    // Store OTP in memory (use lowercase email as key for consistency)
     otpStore.set(email.toLowerCase(), {
       code: otp,
       timestamp: timestamp,
@@ -1158,7 +1076,6 @@ app.post('/api/otp/send', async (req, res) => {
 
     // console.log(`[OTP] ✅ Generated OTP for ${email}: ${otp} (expires in 10 min)`);
 
-    // Send OTP via email using Brevo API
     try {
       const mailOptions = {
         from: `"${EMAIL_CONFIG.fromName}" <${EMAIL_CONFIG.from}>`,
@@ -1197,21 +1114,18 @@ app.post('/api/otp/send', async (req, res) => {
         `
       };
 
-      // Send email via Brevo API with retry logic
       if (BREVO_API_KEY) {
         try {
           await sendEmailWithRetry(mailOptions);
           // console.log(`[OTP] ✅ OTP sent successfully to ${email} via Brevo API`);
         } catch (sendErr) {
           console.warn(`[OTP] ⚠️ Failed to send OTP email after 3 retries: ${sendErr.message}`);
-          // Don't fail the request if email fails - OTP was generated and stored
         }
       } else {
         console.warn(`[OTP] ⚠️ Brevo API key not configured. OTP for ${email}: ${otp} (would be sent via Brevo)`);
       }
     } catch (emailErr) {
       console.error('[OTP] ⚠️ Error preparing email:', emailErr.message);
-      // Don't fail the request if email preparation fails
     }
 
     res.status(200).json({
@@ -1227,15 +1141,10 @@ app.post('/api/otp/send', async (req, res) => {
   }
 });
 
-/**
- * POST /api/otp/verify
- * Verify OTP code and confirm action
- */
 app.post('/api/otp/verify', async (req, res) => {
   try {
     let { email, code } = req.body;
 
-    // Normalize email for consistency
     email = email ? email.trim().toLowerCase() : '';
 
     if (!email || !code) {
@@ -1253,7 +1162,6 @@ app.post('/api/otp/verify', async (req, res) => {
       });
     }
 
-    // Check if OTP has expired
     if (Date.now() > storedOtp.expiry) {
       otpStore.delete(email);
       return res.status(400).json({ 
@@ -1262,7 +1170,6 @@ app.post('/api/otp/verify', async (req, res) => {
       });
     }
 
-    // Verify OTP code
     if (code.toString() !== storedOtp.code) {
       return res.status(400).json({ 
         success: false,
@@ -1270,7 +1177,6 @@ app.post('/api/otp/verify', async (req, res) => {
       });
     }
 
-    // OTP verified - clean up
     otpStore.delete(email);
 
     // console.log(`[OTP] Successfully verified OTP for ${email}`);
@@ -1289,16 +1195,10 @@ app.post('/api/otp/verify', async (req, res) => {
   }
 });
 
-/**
- * POST /api/password/reset
- * Reset user password (verify OTP first, then call XValley API)
- * Frontend calls this endpoint to verify OTP, then calls XValley /profile/reset/ directly with Bearer token
- */
 app.post('/api/password/reset', async (req, res) => {
   try {
     let { email, oldPassword, newPassword, code } = req.body;
 
-    // Normalize email for consistency
     email = email ? email.trim().toLowerCase() : '';
 
     if (!email || !oldPassword || !newPassword || !code) {
@@ -1308,7 +1208,6 @@ app.post('/api/password/reset', async (req, res) => {
       });
     }
 
-    // Step 1: Verify OTP
     const storedOtp = otpStore.get(email);
 
     if (!storedOtp) {
@@ -1318,7 +1217,6 @@ app.post('/api/password/reset', async (req, res) => {
       });
     }
 
-    // Check expiry
     if (Date.now() > storedOtp.expiry) {
       otpStore.delete(email);
       return res.status(400).json({
@@ -1327,7 +1225,6 @@ app.post('/api/password/reset', async (req, res) => {
       });
     }
 
-    // Verify code
     if (code.toString() !== storedOtp.code) {
       return res.status(400).json({
         success: false,
@@ -1335,10 +1232,8 @@ app.post('/api/password/reset', async (req, res) => {
       });
     }
 
-    // OTP valid - clean up
     otpStore.delete(email);
 
-    // Step 2: Validate password strength
     if (newPassword.length < 8) {
       return res.status(400).json({
         success: false,
@@ -1369,7 +1264,6 @@ app.post('/api/password/reset', async (req, res) => {
   }
 });
 
-// ============= ERROR HANDLERS ============
 
 // 404 handler
 app.use((req, res) => {
